@@ -1,0 +1,78 @@
+---
+title: "lawrence_fire"
+author: "Fabio Votta"
+date: "20 9 2018"
+output: github_document
+---
+
+Yesterday, my good friend Ben tagged me in a tweet. On 13th of September 2018, a
+
+## Packages and Folders
+
+```{r}
+# Install these packages if you don't have theme yet
+# devtools::install_github("dkahle/ggmap", ref = "tidyup")
+# install.packages("pacman")
+
+pacman::p_load(tidyverse, pdftools, ggmap)
+
+# Creates folders
+# tidytemplate::data_dir()
+# tidytemplate::images_dir()
+```
+
+
+
+## Load Data
+
+```{r}
+raw_text <- pdftools::pdf_text("http://www.lawpd.com/DocumentCenter/View/3672/09-13-2018")
+
+step1 <- raw_text %>%
+  paste(collapse = "\n")
+
+step2 <- step1 %>%
+  str_split("\n") %>%
+  .[[1]] %>%
+  tibble(text = .) %>%
+  filter(text %>% str_detect("Incident|Location")) %>%
+  mutate(raw = str_extract(text, "^.*?:") %>%
+           str_remove_all("\\:|#") %>%
+           str_trim)
+
+for(jj in 2:nrow(step2)){
+  if(step2$raw[jj] == step2$raw[jj-1]){
+    if(step2$raw[jj] == "Location"){
+      step2$error[jj-1] <- T
+    } else {
+      step2$error[jj] <- T
+    } 
+  } else {
+      #step2$error[jj-1] <- F
+      step2$error[jj] <- F
+    }
+      
+  }
+
+get_id <- function(length, x){
+  return(2:(length+1) %/% x)
+}
+
+firedata <- step2 %>%
+  filter(!error) %>%
+  select(-error) %>%
+  mutate(id = get_id(n(), 2)) %>%
+  spread(raw, text) %>%
+  mutate(date = str_extract(Incident, "\\d{4}.\\d{2}.\\d{2}"),
+         time = str_extract(Incident, "\\d{2}\\:\\d{2}\\:\\d{2}"), 
+         datetime = str_extract(Incident, "Date: (.*?) Type:") %>% 
+           str_remove(., "Date: ")%>% 
+           str_remove(., " Type:") %>% 
+           lubridate::as_datetime(),
+         type = str_extract(Incident, "Type\\: .*?$") %>% str_remove("Type\\:"), 
+         id = str_extract(Incident, "#\\: \\d+") %>% str_remove("#\\:"), 
+         location = str_remove(Location, "Location\\: "), 
+         location = str_remove(Location, "\r")) %>%
+  select(id, datetime, date, time, type, location) %>% 
+  mutate(fire = ifelse(str_detect(type, "FIRE"), 1, 0))
+```

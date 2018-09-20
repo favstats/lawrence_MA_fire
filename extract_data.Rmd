@@ -1,0 +1,166 @@
+---
+title: "911 calls for Lawrence, Mass. as reports of fires came in"
+author: "Fabio Votta"
+date: "20.09.2018"
+output: github_document
+---
+
+Yesterday, my good friend Ben tagged me in a tweet. 
+
+![](images/start_tweet.png)
+
+
+And so an idea was born.
+
+
+## Packages and Folders
+
+```{r}
+# Install these packages if you don't have theme yet
+# devtools::install_github("dkahle/ggmap", ref = "tidyup")
+# install.packages("pacman")
+
+pacman::p_load(tidyverse, pdftools, ggmap)
+
+# Creates folders
+# tidytemplate::data_dir()
+# tidytemplate::images_dir()
+```
+
+
+## Load Data
+
+```{r}
+raw_text <- pdftools::pdf_text("http://www.lawpd.com/DocumentCenter/View/3672/09-13-2018")
+
+step1 <- raw_text %>%
+  paste(collapse = "\n")
+
+step2 <- step1 %>%
+  str_split("\n") %>%
+  .[[1]] %>%
+  tibble(text = .) %>%
+  filter(text %>% str_detect("Incident|Location")) %>%
+  mutate(raw = str_extract(text, "^.*?:") %>%
+           str_remove_all("\\:|#") %>%
+           str_trim)
+
+for(jj in 2:nrow(step2)){
+  if(step2$raw[jj] == step2$raw[jj-1]){
+    if(step2$raw[jj] == "Location"){
+      step2$error[jj-1] <- T
+    } else {
+      step2$error[jj] <- T
+    } 
+  } else {
+      #step2$error[jj-1] <- F
+      step2$error[jj] <- F
+    }
+      
+  }
+
+get_id <- function(length, x){
+  return(2:(length+1) %/% x)
+}
+
+firedata <- step2 %>%
+  filter(!error) %>%
+  select(-error) %>%
+  mutate(id = get_id(n(), 2)) %>%
+  spread(raw, text) %>%
+  mutate(date = str_extract(Incident, "\\d{4}.\\d{2}.\\d{2}"),
+         time = str_extract(Incident, "\\d{2}\\:\\d{2}\\:\\d{2}"), 
+         datetime = str_extract(Incident, "Date: (.*?) Type:") %>% 
+           str_remove(., "Date: ")%>% 
+           str_remove(., " Type:") %>% 
+           lubridate::as_datetime(),
+         type = str_extract(Incident, "Type\\: .*?$") %>% str_remove("Type\\:"), 
+         id = str_extract(Incident, "#\\: \\d+") %>% str_remove("#\\:"), 
+         location = str_remove(Location, "Location\\: "), 
+         location = str_remove(Location, "\r")) %>%
+  select(id, datetime, date, time, type, location) %>% 
+  mutate(fire = ifelse(str_detect(type, "FIRE"), 1, 0))
+
+firedata
+```
+
+
+
+
+## Analysis / Dataviz
+
+```{r, analysis}
+
+firedata %>% 
+  filter(fire == 1) %>%
+  mutate(datetime = lubridate::round_date(datetime, unit = "5 minutes")) %>% 
+  group_by(datetime) %>% 
+  tally() %>% 
+  ggplot(aes(datetime, n)) +
+  geom_line()
+
+```
+
+```{r}
+firedata <- tidytemplate::load_it("data/firedata.Rdata")
+
+firedata <- firedata %>% 
+  mutate(fire = ifelse(fire, "Fire", "Other"))
+library(ggmap)
+
+us <- c(left = -71.19, bottom = 42.68, right = -71.13, top = 42.72)
+map <- get_stamenmap(us, zoom = 14, maptype = "toner-lite")
+
+
+firstmap <- ggmap(map) + # creates the map
+  geom_point(aes(x = lon, y = lat, 
+                 color = fire, shape = fire),                       # adding your data
+             size = 2,
+             data = firedata) +
+  scale_shape_manual("Type", values= c(17, 4))+
+  ggthemes::theme_map() +
+  scale_colour_manual("Type", values = ggthemes::gdocs_pal()(2) %>% rev()) +
+  labs(title = "911 Calls on 13th September 2018 in Lawrence, Massachusetts",
+      caption = "Data Source: LAWPD\nFire Incidents: 84 out of 196 Total Incidents\n@FabioFavusMaxim; favstats.eu")  +
+  theme(plot.title = element_text(size = 13, face = "bold"), 
+    plot.caption = element_text(size = 8))
+  
+tidytemplate::ggsave_it(firstmap, width = 6, height = 6)
+
+
+library(gganimate)
+
+firedata <- firedata %>% 
+  distinct(lon, lat, .keep_all = T)
+
+fire_anim <- ggmap(map) + # creates the map
+  geom_point(aes(x = lon, y = lat, group = id,
+                 color = fire, shape = fire),                       # adding your data
+             size = 3,
+             data = firedata %>% 
+               filter(fire == "Fire")) +
+  scale_shape_manual("Report Type", values= c(17, 4))+
+  ggthemes::theme_map() +
+  scale_colour_manual("Report Type", values = ggthemes::gdocs_pal()(2) %>% rev()) +
+  labs(title = "911 Calls on 13th September 2018 in Lawrence, Massachusetts",
+      subtitle = "Time: {closest_state}",
+      caption = "Data Source: LAWPD\nFire Incidents: 84 out of 196 Total Incidents\n@FabioFavusMaxim; favstats.eu")  +
+  theme(plot.title = element_text(size = 13, face = "bold"),
+    plot.subtitle = element_text(size = 13, face = "bold"), 
+    plot.caption = element_text(size = 10))  +  
+  # geom_text(data = firedata,
+            # aes(label = time, y = 42.719, x = -71.179), size = 6) +
+  transition_states(datetime, 1, 1, wrap = T) +
+  shadow_mark()
+
+
+fire_anim %>% animate(
+  nframes = 500, fps = 10, width = 550, height = 550, detail = 1
+)
+
+anim_save("images/fire_anim.gif")
+
+
+library(reticulate)
+knitr::knit_engines$set(python = reticulate::eng_python)
+```
