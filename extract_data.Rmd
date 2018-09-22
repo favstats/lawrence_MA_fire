@@ -161,6 +161,4 @@ fire_anim %>% animate(
 anim_save("images/fire_anim.gif")
 
 
-library(reticulate)
-knitr::knit_engines$set(python = reticulate::eng_python)
 ```
