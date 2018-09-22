@@ -3,7 +3,7 @@ title: "Gas Explosions in Lawrence, MA"
 author: "Fabio Votta"
 date: "22 9 2018"
 output:
-  html_document:
+  github_document:
     toc: true
     toc_depth: 2
 ---
